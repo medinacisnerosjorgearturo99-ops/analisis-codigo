@@ -3,3 +3,7 @@ uvicorn
 python-multipart
 httpx
 pytest
+bcrypt
+pyjwt
+psycopg2-binary
+sqlalchemy

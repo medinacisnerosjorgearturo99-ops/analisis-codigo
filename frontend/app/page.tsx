@@ -51,6 +51,16 @@ interface PasoEstado {
   error: boolean;
 }
 
+interface HistorialEntry {
+  id: number;
+  proyecto: string;
+  bugs: string;
+  vulnerabilidades: string;
+  code_smells: string;
+  sonar_url: string;
+  fecha: string;
+}
+
 export default function Home() {
   const [textContent, setTextContent] = useState('');
   const [file, setFile] = useState<File | null>(null);
@@ -59,7 +69,34 @@ export default function Home() {
   const [isDragging, setIsDragging] = useState(false);
   const [pasos, setPasos] = useState<Record<number, PasoEstado>>({});
   const [mensajeActual, setMensajeActual] = useState('');
+
+  // Auth
+  const [token, setToken] = useState<string | null>(null);
+  const [email, setEmail] = useState<string | null>(null);
+  const [showModal, setShowModal] = useState(false);
+  const [modalMode, setModalMode] = useState<'login' | 'registro'>('login');
+  const [authEmail, setAuthEmail] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [authConfirm, setAuthConfirm] = useState('');
+  const [authError, setAuthError] = useState('');
+  const [authLoading, setAuthLoading] = useState(false);
+
+  // Historial
+  const [showHistorial, setShowHistorial] = useState(false);
+  const [historial, setHistorial] = useState<HistorialEntry[]>([]);
+  const [historialLoading, setHistorialLoading] = useState(false);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Cargar sesión guardada
+  useEffect(() => {
+    const savedToken = localStorage.getItem('token');
+    const savedEmail = localStorage.getItem('email');
+    if (savedToken && savedEmail) {
+      setToken(savedToken);
+      setEmail(savedEmail);
+    }
+  }, []);
 
   useEffect(() => {
     const preventDefault = (e: DragEvent) => e.preventDefault();
@@ -89,13 +126,90 @@ export default function Home() {
     }
   };
 
+  // Auth handlers
+  const handleAuth = async () => {
+    setAuthError('');
+    if (!authEmail || !authPassword) {
+      setAuthError('Email y contraseña son requeridos.'); return;
+    }
+    if (modalMode === 'registro') {
+      if (authPassword !== authConfirm) {
+        setAuthError('Las contraseñas no coinciden.'); return;
+      }
+      if (authPassword.length < 6) {
+        setAuthError('La contraseña debe tener al menos 6 caracteres.'); return;
+      }
+    }
+
+    setAuthLoading(true);
+    try {
+      const endpoint = modalMode === 'login' ? '/auth/login' : '/auth/registro';
+      const res = await fetch(`${API}${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: authEmail, password: authPassword }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setAuthError(data.detail || 'Error al autenticar.'); return;
+      }
+      localStorage.setItem('token', data.token);
+      localStorage.setItem('email', data.email);
+      setToken(data.token);
+      setEmail(data.email);
+      setShowModal(false);
+      setAuthEmail(''); setAuthPassword(''); setAuthConfirm('');
+    } catch {
+      setAuthError('Error al conectar con el servidor.');
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('email');
+    setToken(null);
+    setEmail(null);
+    setShowHistorial(false);
+    setHistorial([]);
+  };
+
+  const cargarHistorial = async () => {
+    if (!token) return;
+    setHistorialLoading(true);
+    try {
+      const res = await fetch(`${API}/historial`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+      setHistorial(data);
+    } catch {
+      console.error('Error cargando historial');
+    } finally {
+      setHistorialLoading(false);
+    }
+  };
+
+  const toggleHistorial = () => {
+    if (!showHistorial) cargarHistorial();
+    setShowHistorial(!showHistorial);
+  };
+
+  // Análisis con SSE
   const procesarSSE = (endpoint: string, options: RequestInit) => {
     setLoading(true);
     setResult(null);
     setPasos({});
     setMensajeActual('Conectando con el servidor...');
 
-    fetch(`${API}${endpoint}`, options)
+    // Agregar token si hay sesión
+    const headers: Record<string, string> = {
+      ...(options.headers as Record<string, string> || {}),
+    };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    fetch(`${API}${endpoint}`, { ...options, headers })
       .then(response => {
         const reader = response.body!.getReader();
         const decoder = new TextDecoder();
@@ -104,7 +218,6 @@ export default function Home() {
         const leer = () => {
           reader.read().then(({ done, value }) => {
             if (done) { setLoading(false); return; }
-
             buffer += decoder.decode(value, { stream: true });
             const lineas = buffer.split('\n\n');
             buffer = lineas.pop() || '';
@@ -113,7 +226,6 @@ export default function Home() {
               if (!linea.startsWith('data: ')) continue;
               try {
                 const evento = JSON.parse(linea.slice(6));
-
                 if (evento.paso) {
                   setMensajeActual(evento.mensaje);
                   setPasos(prev => ({
@@ -126,7 +238,6 @@ export default function Home() {
                     }
                   }));
                 }
-
                 if (evento.finalizado) {
                   setLoading(false);
                   if (evento.sonar_url) {
@@ -152,19 +263,16 @@ export default function Home() {
       alert('⚠️ Por favor, pega código, una URL de repositorio, o sube un archivo .zip.');
       return;
     }
-
     if (file) {
       const formData = new FormData();
       formData.append('file', file);
       procesarSSE('/upload', { method: 'POST', body: formData });
-
     } else if (isRepoUrl(textContent)) {
       procesarSSE('/analyze-repo', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: textContent.trim() }),
       });
-
     } else {
       const lang = guessLanguage(textContent);
       procesarSSE('/analyze-text', {
@@ -177,7 +285,6 @@ export default function Home() {
 
   const detectedLang = textContent.trim() && !isRepoUrl(textContent)
     ? guessLanguage(textContent) : null;
-
   const modeLabel = file
     ? `📦 ${file.name}`
     : textContent.trim()
@@ -185,27 +292,90 @@ export default function Home() {
       : null;
 
   const pasosCompletados = Object.values(pasos).filter(p => p.completado).length;
-  const totalPasos = PASOS.length;
-  const porcentaje = Math.round((pasosCompletados / totalPasos) * 100);
+  const porcentaje = Math.round((pasosCompletados / PASOS.length) * 100);
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-center bg-[#0f1115] text-white p-6 font-sans">
+
+      {/* Header con botón de login */}
+      <div className="w-full max-w-3xl flex justify-end mb-4">
+        {token ? (
+          <div className="flex items-center gap-3">
+            <button onClick={toggleHistorial}
+              className="text-xs text-gray-400 hover:text-white border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-full transition-all">
+              {showHistorial ? '✕ Cerrar historial' : '📋 Mi historial'}
+            </button>
+            <span className="text-xs text-gray-500">{email}</span>
+            <button onClick={handleLogout}
+              className="text-xs text-gray-500 hover:text-red-400 transition-colors">
+              Cerrar sesión
+            </button>
+          </div>
+        ) : (
+          <button onClick={() => { setShowModal(true); setModalMode('login'); }}
+            className="text-xs bg-[#1e293b] hover:bg-[#2d3a5a] text-gray-300 border border-blue-900/50 px-4 py-1.5 rounded-full transition-all">
+            Iniciar sesión
+          </button>
+        )}
+      </div>
+
       <h1 className="text-4xl font-extrabold tracking-widest mb-2 text-gray-200 uppercase text-center">
         Analizador de Código
       </h1>
-      <p className="text-gray-500 mb-10 text-sm tracking-wide text-center">
+      <p className="text-gray-500 mb-6 text-sm tracking-wide text-center">
         Sube un .zip, pega código, o ingresa la URL de un repositorio de GitHub.
       </p>
+      {!token && (
+        <p className="text-gray-600 mb-6 text-xs text-center">
+          💡 <button onClick={() => { setShowModal(true); setModalMode('registro'); }}
+            className="text-blue-500 hover:text-blue-400 underline">Crea una cuenta</button> para guardar tu historial de análisis
+        </p>
+      )}
+
+      {/* Historial */}
+      {showHistorial && (
+        <div className="w-full max-w-3xl bg-[#161920] border border-gray-800 rounded-xl p-6 mb-6">
+          <h2 className="text-sm font-bold text-gray-300 tracking-widest uppercase mb-4">📋 Últimos análisis</h2>
+          {historialLoading ? (
+            <p className="text-gray-500 text-sm text-center">Cargando...</p>
+          ) : historial.length === 0 ? (
+            <p className="text-gray-500 text-sm text-center">No tienes análisis guardados aún.</p>
+          ) : (
+            <div className="flex flex-col gap-3">
+              {historial.map(entry => (
+                <div key={entry.id} className="bg-[#0d0f14] border border-gray-800 rounded-lg p-4 flex items-center justify-between">
+                  <div>
+                    <p className="text-white font-semibold text-sm">{entry.proyecto}</p>
+                    <p className="text-gray-500 text-xs mt-1">{entry.fecha}</p>
+                    <div className="flex gap-3 mt-2">
+                      <span className="text-red-400 text-xs">🐛 {entry.bugs}</span>
+                      <span className="text-orange-400 text-xs">🔓 {entry.vulnerabilidades}</span>
+                      <span className="text-yellow-400 text-xs">🤢 {entry.code_smells}</span>
+                    </div>
+                  </div>
+                  {entry.sonar_url && (
+                    <a href={entry.sonar_url.replace('http://localhost:9000', SONAR_BASE)}
+                      target="_blank" rel="noopener noreferrer"
+                      className="text-xs text-blue-400 hover:text-white border border-gray-700 hover:border-blue-500 px-3 py-1 rounded-full transition-all">
+                      Ver →
+                    </a>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="w-full max-w-3xl bg-[#161920] rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.5)] border border-gray-800 p-8 flex flex-col items-center">
 
-        {modeLabel && !loading && (
+        {modeLabel && !loading && !result && (
           <div className="w-full mb-3 text-center text-xs text-blue-400 font-semibold tracking-wider">
             {modeLabel}
           </div>
         )}
 
-        {/* Zona de input — se oculta mientras carga */}
+        {/* Input */}
         {!loading && !result && (
           <div
             className={`w-full bg-[#0d0f14] rounded-lg p-2 min-h-[250px] flex flex-col items-center justify-center border-dashed border-2 transition-all relative
@@ -243,30 +413,22 @@ export default function Home() {
           </div>
         )}
 
-        {/* ✅ BARRA DE PROGRESO EN TIEMPO REAL */}
+        {/* Progreso */}
         {loading && (
           <div className="w-full py-4">
-            {/* Barra de porcentaje */}
             <div className="w-full bg-gray-800 rounded-full h-2 mb-6">
-              <div
-                className="bg-blue-500 h-2 rounded-full transition-all duration-500"
-                style={{ width: `${porcentaje}%` }}
-              />
+              <div className="bg-blue-500 h-2 rounded-full transition-all duration-500"
+                style={{ width: `${porcentaje}%` }} />
             </div>
-
-            {/* Mensaje actual */}
             <p className="text-center text-blue-400 text-sm font-semibold mb-6 tracking-wide">
               {mensajeActual}
             </p>
-
-            {/* Lista de pasos */}
             <div className="flex flex-col gap-3">
               {PASOS.map(paso => {
                 const estado = pasos[paso.id];
                 const completado = estado?.completado;
                 const activo = estado?.activo;
                 const error = estado?.error;
-
                 return (
                   <div key={paso.id} className={`flex items-center gap-3 p-3 rounded-lg transition-all
                     ${completado && !error ? 'bg-green-900/20 border border-green-900/40' :
@@ -297,6 +459,9 @@ export default function Home() {
               ${result.status === 'success' ? 'bg-green-900/30 text-green-400 border border-green-800' :
                 'bg-red-900/30 text-red-400 border border-red-800'}`}>
               <p>{result.mensaje}</p>
+              {result.status === 'success' && token && (
+                <p className="text-xs font-normal text-gray-500 mt-1">✅ Guardado en tu historial</p>
+              )}
             </div>
 
             {result.stats && Object.keys(result.stats).length > 0 && (
@@ -324,9 +489,7 @@ export default function Home() {
               <div className="w-full bg-[#0d1117] border border-purple-900/50 rounded-xl p-6 mb-6">
                 <div className="flex items-center gap-2 mb-4">
                   <span className="text-2xl">🤖</span>
-                  <h3 className="text-purple-400 font-bold tracking-widest text-xs uppercase">
-                    Recomendaciones de IA
-                  </h3>
+                  <h3 className="text-purple-400 font-bold tracking-widest text-xs uppercase">Recomendaciones de IA</h3>
                 </div>
                 <div className="text-gray-300 text-sm leading-relaxed whitespace-pre-line">
                   {result.ai_recomendaciones}
@@ -344,19 +507,15 @@ export default function Home() {
               </div>
             )}
 
-            {/* Botón para analizar de nuevo */}
             <div className="flex justify-center">
-              <button
-                onClick={() => { setResult(null); setPasos({}); }}
-                className="text-gray-500 hover:text-gray-300 text-sm underline"
-              >
+              <button onClick={() => { setResult(null); setPasos({}); }}
+                className="text-gray-500 hover:text-gray-300 text-sm underline">
                 ← Analizar otro proyecto
               </button>
             </div>
           </div>
         )}
 
-        {/* Botón principal */}
         {!loading && !result && (
           <button onClick={handleAnalyze}
             className="mt-8 px-14 py-4 font-bold rounded shadow-[0_5px_15px_rgba(0,0,0,0.4)] uppercase tracking-[0.2em] text-sm transition-all w-full md:w-auto bg-gradient-to-b from-[#2d3a5a] to-[#1e293b] hover:from-[#3b4b7a] hover:to-[#2d3a5a] text-white border border-blue-900/50 active:scale-95">
@@ -364,6 +523,69 @@ export default function Home() {
           </button>
         )}
       </div>
+
+      {/* Modal de Login/Registro */}
+      {showModal && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+          <div className="bg-[#161920] border border-gray-800 rounded-xl p-8 w-full max-w-md shadow-2xl">
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-lg font-bold text-white">
+                {modalMode === 'login' ? 'Iniciar sesión' : 'Crear cuenta'}
+              </h2>
+              <button onClick={() => { setShowModal(false); setAuthError(''); }}
+                className="text-gray-500 hover:text-white text-xl">✕</button>
+            </div>
+
+            <div className="flex flex-col gap-4">
+              <input
+                type="email"
+                placeholder="Correo electrónico"
+                value={authEmail}
+                onChange={e => setAuthEmail(e.target.value)}
+                className="bg-[#0d0f14] border border-gray-700 rounded-lg px-4 py-3 text-white text-sm focus:outline-none focus:border-blue-500 transition-colors"
+              />
+              <input
+                type="password"
+                placeholder="Contraseña"
+                value={authPassword}
+                onChange={e => setAuthPassword(e.target.value)}
+                className="bg-[#0d0f14] border border-gray-700 rounded-lg px-4 py-3 text-white text-sm focus:outline-none focus:border-blue-500 transition-colors"
+              />
+              {modalMode === 'registro' && (
+                <input
+                  type="password"
+                  placeholder="Confirmar contraseña"
+                  value={authConfirm}
+                  onChange={e => setAuthConfirm(e.target.value)}
+                  className="bg-[#0d0f14] border border-gray-700 rounded-lg px-4 py-3 text-white text-sm focus:outline-none focus:border-blue-500 transition-colors"
+                />
+              )}
+
+              {authError && (
+                <p className="text-red-400 text-xs text-center">{authError}</p>
+              )}
+
+              <button
+                onClick={handleAuth}
+                disabled={authLoading}
+                className={`py-3 rounded-lg font-bold text-sm uppercase tracking-wider transition-all
+                  ${authLoading ? 'bg-gray-700 text-gray-500 cursor-not-allowed' :
+                    'bg-gradient-to-b from-[#2d3a5a] to-[#1e293b] hover:from-[#3b4b7a] text-white border border-blue-900/50'}`}>
+                {authLoading ? '...' : modalMode === 'login' ? 'Entrar' : 'Registrarse'}
+              </button>
+
+              <p className="text-center text-xs text-gray-500">
+                {modalMode === 'login' ? '¿No tienes cuenta?' : '¿Ya tienes cuenta?'}{' '}
+                <button
+                  onClick={() => { setModalMode(modalMode === 'login' ? 'registro' : 'login'); setAuthError(''); }}
+                  className="text-blue-400 hover:text-blue-300 underline">
+                  {modalMode === 'login' ? 'Regístrate' : 'Inicia sesión'}
+                </button>
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

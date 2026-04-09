@@ -1,6 +1,7 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from sqlalchemy.orm import Session
 import shutil
 import os
 import zipfile
@@ -9,6 +10,14 @@ import time
 import urllib.request
 import json
 import base64
+import bcrypt
+import jwt
+from datetime import datetime, timedelta
+from database import get_db, engine
+from models import Base, Usuario, Historial
+
+# Crear tablas si no existen
+Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="API de Análisis de Código")
 
@@ -23,6 +32,7 @@ app.add_middleware(
 SONAR_TOKEN = os.environ.get("SONAR_TOKEN", "")
 SONAR_HOST_URL = os.environ.get("SONAR_HOST_URL", "http://sonarqube:9000")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+JWT_SECRET = os.environ.get("JWT_SECRET", "clave_secreta_super_segura_2024")
 
 SONAR_EXCLUSIONS = ",".join([
     "**/node_modules/**", "**/.venv/**", "**/venv/**",
@@ -35,6 +45,48 @@ SONAR_TEST_EXCLUSIONS = ",".join([
     "**/tests/**", "**/test/**", "**/*.test.*",
     "**/*.spec.*", "**/__tests__/**",
 ])
+
+
+# ─────────────────────────────────────────────
+# AUTH UTILITIES
+# ─────────────────────────────────────────────
+
+def crear_token(usuario_id: int, email: str) -> str:
+    payload = {
+        "sub": usuario_id,
+        "email": email,
+        "exp": datetime.utcnow() + timedelta(days=7)
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm="HS256")
+
+
+def verificar_token(authorization: str = Header(None)) -> dict | None:
+    """Verifica el token JWT. Retorna None si no hay token (usuario anónimo)."""
+    if not authorization or not authorization.startswith("Bearer "):
+        return None
+    token = authorization.split(" ")[1]
+    try:
+        return jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expirado.")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Token inválido.")
+
+
+def guardar_historial(db: Session, usuario_id: int, proyecto: str, stats: dict,
+                      ai_recomendaciones: str, sonar_url: str):
+    """Guarda un análisis en el historial del usuario."""
+    entrada = Historial(
+        usuario_id=usuario_id,
+        proyecto=proyecto,
+        bugs=stats.get("bugs", "0"),
+        vulnerabilidades=stats.get("vulnerabilities", "0"),
+        code_smells=stats.get("code_smells", "0"),
+        ai_recomendaciones=ai_recomendaciones,
+        sonar_url=sonar_url,
+    )
+    db.add(entrada)
+    db.commit()
 
 
 # ─────────────────────────────────────────────
@@ -172,18 +224,16 @@ Sé conciso, práctico y usa lenguaje claro. Máximo 250 palabras."""
 
 
 # ─────────────────────────────────────────────
-# SSE — GENERADOR DE PROGRESO EN TIEMPO REAL
+# SSE
 # ─────────────────────────────────────────────
 
 def sse_event(data: dict) -> str:
-    """Formatea un evento SSE."""
     return f"data: {json.dumps(data)}\n\n"
 
 
-def run_sonar_scan_stream(source_path: str, project_key: str):
-    """Generador que hace el análisis y va enviando el progreso por SSE."""
-
-    # Paso 1
+def run_sonar_scan_stream(source_path: str, project_key: str,
+                          usuario_payload: dict | None = None,
+                          db: Session | None = None):
     yield sse_event({"paso": 1, "mensaje": "🔍 Iniciando análisis...", "completado": False})
 
     cmd = [
@@ -200,7 +250,6 @@ def run_sonar_scan_stream(source_path: str, project_key: str):
         "-Dsonar.javascript.node.maxspace=256",
     ]
 
-    # Paso 2
     yield sse_event({"paso": 2, "mensaje": "⚙️ Ejecutando SonarQube Scanner...", "completado": False})
 
     process = subprocess.Popen(
@@ -216,36 +265,43 @@ def run_sonar_scan_stream(source_path: str, project_key: str):
         return
 
     yield sse_event({"paso": 2, "mensaje": "✅ Scanner completado", "completado": True})
-
-    # Paso 3
     yield sse_event({"paso": 3, "mensaje": "⏳ Procesando resultados en SonarQube...", "completado": False})
     wait_for_sonar_task(project_key)
     yield sse_event({"paso": 3, "mensaje": "✅ Resultados procesados", "completado": True})
 
-    # Paso 4
     yield sse_event({"paso": 4, "mensaje": "📊 Obteniendo métricas...", "completado": False})
     stats = get_sonar_metrics(project_key)
     issues = get_sonar_issues(project_key)
     yield sse_event({"paso": 4, "mensaje": "✅ Métricas obtenidas", "completado": True})
 
-    # Paso 5
     yield sse_event({"paso": 5, "mensaje": "🤖 Generando recomendaciones con IA...", "completado": False})
     ai_recomendaciones = get_ai_recommendations(stats, issues, project_key)
     yield sse_event({"paso": 5, "mensaje": "✅ Recomendaciones generadas", "completado": True})
 
-    # Resultado final
+    sonar_url = f"http://localhost:9000/dashboard?id={project_key}"
+
+    # Guardar en historial si hay usuario autenticado
+    if usuario_payload and db:
+        try:
+            guardar_historial(
+                db, usuario_payload["sub"], project_key,
+                stats, ai_recomendaciones, sonar_url
+            )
+        except Exception as e:
+            print(f"⚠️ Error guardando historial: {e}")
+
     yield sse_event({
         "finalizado": True,
         "status": "success",
         "mensaje": f"Análisis de '{project_key}' completado.",
         "stats": stats,
         "ai_recomendaciones": ai_recomendaciones,
-        "sonar_url": f"http://localhost:9000/dashboard?id={project_key}",
+        "sonar_url": sonar_url,
     })
 
 
 # ─────────────────────────────────────────────
-# ENDPOINTS
+# ENDPOINTS — AUTH
 # ─────────────────────────────────────────────
 
 @app.get("/")
@@ -258,8 +314,84 @@ def health_check():
     return {"status": "ok"}
 
 
+@app.post("/auth/registro")
+def registro(payload: dict, db: Session = Depends(get_db)):
+    email = payload.get("email", "").strip().lower()
+    password = payload.get("password", "")
+
+    if not email or not password:
+        raise HTTPException(status_code=400, detail="Email y contraseña son requeridos.")
+    if len(password) < 6:
+        raise HTTPException(status_code=400, detail="La contraseña debe tener al menos 6 caracteres.")
+
+    if db.query(Usuario).filter(Usuario.email == email).first():
+        raise HTTPException(status_code=400, detail="Este email ya está registrado.")
+
+    password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+    usuario = Usuario(email=email, password_hash=password_hash)
+    db.add(usuario)
+    db.commit()
+    db.refresh(usuario)
+
+    token = crear_token(usuario.id, usuario.email)
+    return {"token": token, "email": usuario.email}
+
+
+@app.post("/auth/login")
+def login(payload: dict, db: Session = Depends(get_db)):
+    email = payload.get("email", "").strip().lower()
+    password = payload.get("password", "")
+
+    usuario = db.query(Usuario).filter(Usuario.email == email).first()
+    if not usuario or not bcrypt.checkpw(password.encode(), usuario.password_hash.encode()):
+        raise HTTPException(status_code=401, detail="Email o contraseña incorrectos.")
+
+    token = crear_token(usuario.id, usuario.email)
+    return {"token": token, "email": usuario.email}
+
+
+@app.get("/historial")
+def obtener_historial(
+    authorization: str = Header(None),
+    db: Session = Depends(get_db)
+):
+    usuario_payload = verificar_token(authorization)
+    if not usuario_payload:
+        raise HTTPException(status_code=401, detail="Debes iniciar sesión para ver el historial.")
+
+    entradas = (
+        db.query(Historial)
+        .filter(Historial.usuario_id == usuario_payload["sub"])
+        .order_by(Historial.fecha.desc())
+        .limit(10)
+        .all()
+    )
+
+    return [
+        {
+            "id": e.id,
+            "proyecto": e.proyecto,
+            "bugs": e.bugs,
+            "vulnerabilidades": e.vulnerabilidades,
+            "code_smells": e.code_smells,
+            "sonar_url": e.sonar_url,
+            "fecha": e.fecha.strftime("%d/%m/%Y %H:%M"),
+        }
+        for e in entradas
+    ]
+
+
+# ─────────────────────────────────────────────
+# ENDPOINTS — ANÁLISIS
+# ─────────────────────────────────────────────
+
 @app.post("/upload")
-async def upload_code(file: UploadFile = File(...)):
+async def upload_code(
+    file: UploadFile = File(...),
+    authorization: str = Header(None),
+    db: Session = Depends(get_db)
+):
+    usuario_payload = verificar_token(authorization)
     os.makedirs("temp_uploads", exist_ok=True)
     os.makedirs("temp_unzipped", exist_ok=True)
 
@@ -268,7 +400,6 @@ async def upload_code(file: UploadFile = File(...)):
     extract_path = f"temp_unzipped/{project_key}"
 
     try:
-        # Paso 1: guardar y descomprimir ANTES de hacer streaming
         with open(file_location, "wb+") as f:
             shutil.copyfileobj(file.file, f)
         with zipfile.ZipFile(file_location, "r") as zip_ref:
@@ -283,7 +414,7 @@ async def upload_code(file: UploadFile = File(...)):
 
     def stream():
         yield sse_event({"paso": 1, "mensaje": "✅ Archivo descomprimido", "completado": True})
-        yield from run_sonar_scan_stream(extract_path, project_key)
+        yield from run_sonar_scan_stream(extract_path, project_key, usuario_payload, db)
         if os.path.exists(extract_path):
             shutil.rmtree(extract_path, ignore_errors=True)
 
@@ -291,7 +422,12 @@ async def upload_code(file: UploadFile = File(...)):
 
 
 @app.post("/analyze-repo")
-async def analyze_repo(payload: dict):
+async def analyze_repo(
+    payload: dict,
+    authorization: str = Header(None),
+    db: Session = Depends(get_db)
+):
+    usuario_payload = verificar_token(authorization)
     repo_url = payload.get("url", "").strip()
     if not repo_url:
         raise HTTPException(status_code=400, detail="No se recibió URL.")
@@ -312,10 +448,8 @@ async def analyze_repo(payload: dict):
             if result.returncode != 0:
                 yield sse_event({"finalizado": True, "status": "error", "mensaje": f"No se pudo clonar: {result.stderr}"})
                 return
-
             yield sse_event({"paso": 1, "mensaje": "✅ Repositorio clonado", "completado": True})
-            yield from run_sonar_scan_stream(clone_path, project_key)
-
+            yield from run_sonar_scan_stream(clone_path, project_key, usuario_payload, db)
         except subprocess.TimeoutExpired:
             yield sse_event({"finalizado": True, "status": "error", "mensaje": "El repositorio tardó demasiado."})
         except Exception as e:
@@ -328,7 +462,12 @@ async def analyze_repo(payload: dict):
 
 
 @app.post("/analyze-text")
-async def analyze_text(payload: dict):
+async def analyze_text(
+    payload: dict,
+    authorization: str = Header(None),
+    db: Session = Depends(get_db)
+):
+    usuario_payload = verificar_token(authorization)
     code = payload.get("code", "").strip()
     language = payload.get("language", "js")
     if not code:
@@ -343,7 +482,7 @@ async def analyze_text(payload: dict):
             with open(os.path.join(temp_dir, f"code.{language}"), "w", encoding="utf-8") as f:
                 f.write(code)
             yield sse_event({"paso": 1, "mensaje": "✅ Código recibido", "completado": True})
-            yield from run_sonar_scan_stream(temp_dir, project_key)
+            yield from run_sonar_scan_stream(temp_dir, project_key, usuario_payload, db)
         except Exception as e:
             yield sse_event({"finalizado": True, "status": "error", "mensaje": str(e)})
         finally:
