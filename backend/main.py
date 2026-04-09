@@ -150,7 +150,7 @@ Sé conciso, práctico y usa lenguaje claro. Máximo 250 palabras."""
 
     try:
         payload = json.dumps({
-            "model": "claude-haiku-4-5-20251001",
+            "model": "claude-haiku-4-5",
             "max_tokens": 500,
             "messages": [{"role": "user", "content": prompt}]
         }).encode("utf-8")
@@ -220,7 +220,7 @@ def run_sonar_scan(source_path: str, project_key: str) -> dict:
         "mensaje": f"Análisis de '{project_key}' completado.",
         "stats": stats,
         "ai_recomendaciones": ai_recomendaciones,
-        "sonar_url": f"http://localhost:9000/dashboard?id={project_key}",
+        "sonar_url": f"http://108.175.13.227:9000/dashboard?id={project_key}",
     }
 
 
