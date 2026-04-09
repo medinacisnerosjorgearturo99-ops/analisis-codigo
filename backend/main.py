@@ -150,7 +150,7 @@ Sé conciso, práctico y usa lenguaje claro. Máximo 250 palabras."""
 
     try:
         payload = json.dumps({
-            "model": "claude-haiku-4-5",
+            "model": "claude-3-haiku-20240307",
             "max_tokens": 500,
             "messages": [{"role": "user", "content": prompt}]
         }).encode("utf-8")
