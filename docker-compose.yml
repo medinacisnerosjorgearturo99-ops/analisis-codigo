@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # 1. Base de Datos
   db:
@@ -10,7 +8,7 @@ services:
       - POSTGRES_PASSWORD=adminpassword
       - POSTGRES_DB=sonar
     volumes:
-      - postgres_data:/var/lib/postgresql/data   # persiste la BD entre reinicios
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U admin -d sonar"]
       interval: 10s
@@ -31,7 +29,7 @@ services:
       - SONAR_JDBC_PASSWORD=adminpassword
     volumes:
       - sonarqube_data:/opt/sonarqube/data
-      - sonarqube_extensions:/opt/sonarqube/extensions   # caché de analizadores de lenguaje
+      - sonarqube_extensions:/opt/sonarqube/extensions
       - sonarqube_logs:/opt/sonarqube/logs
     depends_on:
       db:
@@ -72,7 +70,6 @@ services:
     networks:
       - analisis-network
 
-# Volúmenes persistentes — sobreviven a docker compose down
 volumes:
   postgres_data:
   sonarqube_data:

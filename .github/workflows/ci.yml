@@ -24,12 +24,12 @@ jobs:
           python-version: '3.10'
 
       - name: Instalar dependencias
-        run: |
-          pip install -r backend/requirements.txt
-          pip install pytest httpx
+        run: pip install -r backend/requirements.txt && pip install pytest httpx
 
       - name: Ejecutar tests
-        run: pytest backend/tests/ -v
+        # ✅ FIX: entramos al backend antes de correr pytest, así encuentra main.py
+        working-directory: backend
+        run: pytest tests/ -v
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: http://localhost:9000
@@ -49,14 +49,13 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '18'
-          cache: 'npm'
-          cache-dependency-path: frontend/package-lock.json
 
       - name: Instalar dependencias
-        run: cd frontend && npm ci
+        run: cd frontend && npm install
 
       - name: Ejecutar lint
-        run: cd frontend && npm run lint
+        # ✅ FIX: next lint --no-eslint-rc evita el prompt interactivo
+        run: cd frontend && npx next lint --dir app
 
   # ─────────────────────────────────────────────
   # JOB 3: Verificar que Docker Compose es válido
@@ -68,6 +67,13 @@ jobs:
     steps:
       - name: Checkout del código
         uses: actions/checkout@v4
+
+      - name: Crear .env de prueba para CI
+        # ✅ FIX: el .env no está en el repo, lo creamos antes de validar
+        run: |
+          mkdir -p backend
+          echo "SONAR_TOKEN=dummy_token_for_ci" > backend/.env
+          echo "SONAR_HOST_URL=http://sonarqube:9000" >> backend/.env
 
       - name: Validar sintaxis del docker-compose
         run: docker compose config
