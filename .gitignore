@@ -1,0 +1,19 @@
+# Variables de entorno — NUNCA subir al repo
+backend/.env
+.env
+
+# Archivos temporales del backend
+backend/temp_uploads/
+backend/temp_unzipped/
+backend/__pycache__/
+backend/.scannerwork/
+
+# Node.js
+frontend/node_modules/
+frontend/.next/
+
+# Python
+*.pyc
+*.pyo
+__pycache__/
+.pytest_cache/
