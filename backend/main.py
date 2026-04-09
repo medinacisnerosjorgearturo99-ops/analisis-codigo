@@ -18,43 +18,30 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- CONFIGURACIÓN — se lee del archivo .env ---
+# --- CONFIGURACIÓN ---
 SONAR_TOKEN = os.environ.get("SONAR_TOKEN", "")
 SONAR_HOST_URL = os.environ.get("SONAR_HOST_URL", "http://sonarqube:9000")
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 
-# Carpetas y archivos que SonarQube no necesita analizar
 SONAR_EXCLUSIONS = ",".join([
-    "**/node_modules/**",
-    "**/.venv/**",
-    "**/venv/**",
-    "**/dist/**",
-    "**/build/**",
-    "**/.next/**",
-    "**/.git/**",
-    "**/coverage/**",
-    "**/__pycache__/**",
-    "**/*.min.js",
-    "**/*.min.css",
+    "**/node_modules/**", "**/.venv/**", "**/venv/**",
+    "**/dist/**", "**/build/**", "**/.next/**",
+    "**/.git/**", "**/coverage/**", "**/__pycache__/**",
+    "**/*.min.js", "**/*.min.css",
 ])
 
-# Archivos de test — se analizan pero no cuentan como código principal
 SONAR_TEST_EXCLUSIONS = ",".join([
-    "**/tests/**",
-    "**/test/**",
-    "**/*.test.*",
-    "**/*.spec.*",
-    "**/__tests__/**",
+    "**/tests/**", "**/test/**", "**/*.test.*",
+    "**/*.spec.*", "**/__tests__/**",
 ])
 
 
 # ─────────────────────────────────────────────
-# UTILIDADES
+# UTILIDADES SONARQUBE
 # ─────────────────────────────────────────────
 
 def wait_for_sonar_task(project_key: str, max_wait: int = 60) -> bool:
-    """Polling hasta que SonarQube confirme que terminó de procesar."""
     auth = base64.b64encode(f"{SONAR_TOKEN}:".encode()).decode()
-
     for _ in range(max_wait // 2):
         time.sleep(2)
         url = f"{SONAR_HOST_URL}/api/ce/activity?component={project_key}&ps=1"
@@ -70,12 +57,10 @@ def wait_for_sonar_task(project_key: str, max_wait: int = 60) -> bool:
                     return False
         except Exception as e:
             print(f"⚠️ Error consultando tarea: {e}")
-
     return False
 
 
 def get_sonar_metrics(project_key: str) -> dict:
-    """Obtiene bugs, vulnerabilidades y code smells de SonarQube."""
     try:
         auth = base64.b64encode(f"{SONAR_TOKEN}:".encode()).decode()
         url = (
@@ -94,8 +79,107 @@ def get_sonar_metrics(project_key: str) -> dict:
         return {}
 
 
+def get_sonar_issues(project_key: str) -> list:
+    """Obtiene los issues detallados de SonarQube para pasarlos a Claude."""
+    try:
+        auth = base64.b64encode(f"{SONAR_TOKEN}:".encode()).decode()
+        url = (
+            f"{SONAR_HOST_URL}/api/issues/search"
+            f"?componentKeys={project_key}"
+            f"&ps=10"  # máximo 10 issues para no saturar el prompt
+            f"&statuses=OPEN"
+        )
+        req = urllib.request.Request(url)
+        req.add_header("Authorization", f"Basic {auth}")
+        with urllib.request.urlopen(req) as r:
+            data = json.loads(r.read())
+            issues = data.get("issues", [])
+            return [
+                {
+                    "tipo": i.get("type", ""),
+                    "severidad": i.get("severity", ""),
+                    "mensaje": i.get("message", ""),
+                    "archivo": i.get("component", "").split(":")[-1],
+                    "linea": i.get("line", "?"),
+                }
+                for i in issues
+            ]
+    except Exception as e:
+        print(f"⚠️ Error obteniendo issues: {e}")
+        return []
+
+
+# ─────────────────────────────────────────────
+# INTEGRACIÓN CON CLAUDE
+# ─────────────────────────────────────────────
+
+def get_ai_recommendations(stats: dict, issues: list, project_key: str) -> str:
+    """Llama a la API de Claude y obtiene recomendaciones en español."""
+    if not ANTHROPIC_API_KEY:
+        return ""
+
+    bugs = stats.get("bugs", "0")
+    vulns = stats.get("vulnerabilities", "0")
+    smells = stats.get("code_smells", "0")
+
+    issues_text = ""
+    if issues:
+        issues_text = "\n".join([
+            f"- [{i['severidad']}] {i['tipo']} en {i['archivo']} línea {i['linea']}: {i['mensaje']}"
+            for i in issues
+        ])
+    else:
+        issues_text = "No se encontraron issues detallados."
+
+    prompt = f"""Eres un experto en calidad de software y DevOps. Analiza los siguientes resultados de SonarQube para el proyecto '{project_key}' y proporciona recomendaciones claras y prácticas en español.
+
+MÉTRICAS:
+- Bugs: {bugs}
+- Vulnerabilidades: {vulns}
+- Code Smells: {smells}
+
+ISSUES ENCONTRADOS:
+{issues_text}
+
+Por favor responde con:
+1. Un resumen breve del estado general del código (1-2 oraciones)
+2. Los 3 problemas más importantes a resolver y cómo solucionarlos
+3. Una recomendación final de prioridad (qué arreglar primero)
+
+Sé conciso, práctico y usa lenguaje claro. Máximo 250 palabras."""
+
+    try:
+        payload = json.dumps({
+            "model": "claude-haiku-4-5-20251001",
+            "max_tokens": 500,
+            "messages": [{"role": "user", "content": prompt}]
+        }).encode("utf-8")
+
+        req = urllib.request.Request(
+            "https://api.anthropic.com/v1/messages",
+            data=payload,
+            headers={
+                "Content-Type": "application/json",
+                "x-api-key": ANTHROPIC_API_KEY,
+                "anthropic-version": "2023-06-01",
+            },
+            method="POST"
+        )
+
+        with urllib.request.urlopen(req) as r:
+            data = json.loads(r.read())
+            return data["content"][0]["text"]
+
+    except Exception as e:
+        print(f"⚠️ Error llamando a Claude: {e}")
+        return ""
+
+
+# ─────────────────────────────────────────────
+# LÓGICA PRINCIPAL
+# ─────────────────────────────────────────────
+
 def run_sonar_scan(source_path: str, project_key: str) -> dict:
-    """Lanza sonar-scanner con todas las optimizaciones de velocidad."""
     print(f"\n🚀 Iniciando escaneo de: {project_key}")
 
     cmd = [
@@ -104,18 +188,11 @@ def run_sonar_scan(source_path: str, project_key: str) -> dict:
         f"-Dsonar.sources={source_path}",
         f"-Dsonar.host.url={SONAR_HOST_URL}",
         f"-Dsonar.login={SONAR_TOKEN}",
-
-        # ── Exclusiones: no escanear archivos innecesarios ──
         f"-Dsonar.exclusions={SONAR_EXCLUSIONS}",
         f"-Dsonar.test.exclusions={SONAR_TEST_EXCLUSIONS}",
-
-        # ── Velocidad: desactivar análisis que no necesitamos ──
-        "-Dsonar.scm.disabled=true",          # no analiza historial de git
-        "-Dsonar.coverage.exclusions=**/*",   # omite análisis de cobertura de tests
+        "-Dsonar.scm.disabled=true",
+        "-Dsonar.coverage.exclusions=**/*",
         "-Dsonar.sourceEncoding=UTF-8",
-
-        # ── Velocidad: limitar RAM del analizador de JavaScript ──
-        # (sin esto puede pedir hasta 2GB para proyectos JS grandes)
         "-Dsonar.javascript.node.maxspace=256",
     ]
 
@@ -133,11 +210,16 @@ def run_sonar_scan(source_path: str, project_key: str) -> dict:
     wait_for_sonar_task(project_key)
 
     stats = get_sonar_metrics(project_key)
+    issues = get_sonar_issues(project_key)
+
+    print("🤖 Generando recomendaciones con IA...")
+    ai_recomendaciones = get_ai_recommendations(stats, issues, project_key)
 
     return {
         "status": "success",
         "mensaje": f"Análisis de '{project_key}' completado.",
         "stats": stats,
+        "ai_recomendaciones": ai_recomendaciones,
         "sonar_url": f"http://localhost:9000/dashboard?id={project_key}",
     }
 
@@ -158,7 +240,6 @@ def health_check():
 
 @app.post("/upload")
 async def upload_code(file: UploadFile = File(...)):
-    """Recibe un .zip, lo descomprime y lo analiza."""
     os.makedirs("temp_uploads", exist_ok=True)
     os.makedirs("temp_unzipped", exist_ok=True)
 
@@ -169,12 +250,9 @@ async def upload_code(file: UploadFile = File(...)):
     try:
         with open(file_location, "wb+") as f:
             shutil.copyfileobj(file.file, f)
-
         with zipfile.ZipFile(file_location, "r") as zip_ref:
             zip_ref.extractall(extract_path)
-
         return run_sonar_scan(extract_path, project_key)
-
     except zipfile.BadZipFile:
         raise HTTPException(status_code=400, detail="El archivo no es un ZIP válido.")
     except Exception as e:
@@ -188,9 +266,7 @@ async def upload_code(file: UploadFile = File(...)):
 
 @app.post("/analyze-repo")
 async def analyze_repo(payload: dict):
-    """Clona un repositorio público y lo analiza."""
     repo_url = payload.get("url", "").strip()
-
     if not repo_url:
         raise HTTPException(status_code=400, detail="No se recibió URL.")
     if not (repo_url.startswith("http") or repo_url.startswith("git@")):
@@ -203,20 +279,13 @@ async def analyze_repo(payload: dict):
     try:
         result = subprocess.run(
             ["git", "clone", "--depth=1", repo_url, clone_path],
-            capture_output=True,
-            text=True,
-            timeout=120,
+            capture_output=True, text=True, timeout=120,
         )
         if result.returncode != 0:
-            raise HTTPException(
-                status_code=400,
-                detail=f"No se pudo clonar el repositorio: {result.stderr}",
-            )
-
+            raise HTTPException(status_code=400, detail=f"No se pudo clonar: {result.stderr}")
         return run_sonar_scan(clone_path, project_key)
-
     except subprocess.TimeoutExpired:
-        raise HTTPException(status_code=408, detail="El repositorio tardó demasiado en clonarse.")
+        raise HTTPException(status_code=408, detail="El repositorio tardó demasiado.")
     except HTTPException:
         raise
     except Exception as e:
@@ -228,10 +297,8 @@ async def analyze_repo(payload: dict):
 
 @app.post("/analyze-text")
 async def analyze_text(payload: dict):
-    """Analiza código pegado como texto plano."""
     code = payload.get("code", "").strip()
     language = payload.get("language", "js")
-
     if not code:
         raise HTTPException(status_code=400, detail="No se recibió código.")
 
@@ -242,9 +309,7 @@ async def analyze_text(payload: dict):
     try:
         with open(os.path.join(temp_dir, f"code.{language}"), "w", encoding="utf-8") as f:
             f.write(code)
-
         return run_sonar_scan(temp_dir, project_key)
-
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     finally:
