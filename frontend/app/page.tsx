@@ -1,7 +1,10 @@
 'use client';
 import { useState, useRef, useEffect } from 'react';
 
-const API = 'http://108.175.13.227:8000';
+// ✅ Lee la URL del backend desde variable de entorno
+// En local usa localhost, en servidor usa la IP automáticamente
+const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const SONAR_BASE = process.env.NEXT_PUBLIC_SONAR_URL || 'http://localhost:9000';
 
 function guessLanguage(code: string): { ext: string; label: string } {
   const c = code.trim();
@@ -107,7 +110,12 @@ export default function Home() {
           body: JSON.stringify({ code: textContent, language: lang.ext }),
         });
       }
-      setResult(await response.json());
+      const data = await response.json();
+      // Reemplazar la URL de SonarQube con la variable de entorno correcta
+      if (data.sonar_url) {
+        data.sonar_url = data.sonar_url.replace('http://localhost:9000', SONAR_BASE);
+      }
+      setResult(data);
     } catch (error) {
       setResult({ status: 'error', mensaje: 'Error al conectar con el servidor.' });
     } finally {
@@ -132,7 +140,6 @@ export default function Home() {
           </div>
         )}
 
-        {/* Zona de input */}
         <div
           className={`w-full bg-[#0d0f14] rounded-lg p-2 min-h-[250px] flex flex-col items-center justify-center border-dashed border-2 transition-all relative
             ${isDragging ? 'bg-[#1a1f2b] border-blue-400 scale-[1.02]' : 'border-gray-800 hover:border-gray-600'}`}
@@ -170,11 +177,8 @@ export default function Home() {
           )}
         </div>
 
-        {/* Resultados */}
         {result && (
           <div className="mt-8 w-full">
-
-            {/* Mensaje de estado */}
             <div className={`p-4 rounded-lg text-center font-bold text-sm mb-6
               ${result.status === 'success' ? 'bg-green-900/30 text-green-400 border border-green-800' :
                 result.status === 'info' ? 'bg-blue-900/30 text-blue-400 border border-blue-800' :
@@ -182,7 +186,6 @@ export default function Home() {
               <p>{result.mensaje}</p>
             </div>
 
-            {/* Métricas */}
             {result.stats && Object.keys(result.stats).length > 0 && (
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
                 <div className="bg-[#1a1f2b] border border-red-900/50 p-6 rounded-xl flex flex-col items-center shadow-lg hover:border-red-500 transition-colors">
@@ -204,7 +207,6 @@ export default function Home() {
               </div>
             )}
 
-            {/* ✅ NUEVO: Recomendaciones de IA */}
             {result.ai_recomendaciones && (
               <div className="w-full bg-[#0d1117] border border-purple-900/50 rounded-xl p-6 mb-6">
                 <div className="flex items-center gap-2 mb-4">
@@ -219,7 +221,6 @@ export default function Home() {
               </div>
             )}
 
-            {/* Link a SonarQube */}
             {result.sonar_url && (
               <div className="flex justify-center">
                 <a href={result.sonar_url} target="_blank" rel="noopener noreferrer"
@@ -232,7 +233,6 @@ export default function Home() {
           </div>
         )}
 
-        {/* Botón principal */}
         <button onClick={handleAnalyze} disabled={loading}
           className={`mt-8 px-14 py-4 font-bold rounded shadow-[0_5px_15px_rgba(0,0,0,0.4)] uppercase tracking-[0.2em] text-sm transition-all w-full md:w-auto
             ${loading
