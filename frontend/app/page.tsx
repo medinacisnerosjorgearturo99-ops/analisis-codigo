@@ -1,7 +1,7 @@
 'use client';
 import { useState, useRef, useEffect } from 'react';
 
-const API = 'http://localhost:8000';
+const API = 'http://108.175.13.227:8000';
 
 function guessLanguage(code: string): { ext: string; label: string } {
   const c = code.trim();
