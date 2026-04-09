@@ -2,9 +2,9 @@ name: CI Pipeline
 
 on:
   pull_request:
-    branches: [main]
+    branches: ' '
   push:
-    branches: [main]
+    branches: ' '
 
 jobs:
   # ─────────────────────────────────────────────
@@ -13,6 +13,22 @@ jobs:
   test-backend:
     name: 🐍 Tests Backend
     runs-on: ubuntu-latest
+
+    # ✅ FIX 1: Levantamos una base de datos real dentro del servidor de GitHub
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: sonar
+          POSTGRES_PASSWORD: sonar
+          POSTGRES_DB: sonar
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     steps:
       - name: Checkout del código
@@ -27,12 +43,17 @@ jobs:
         run: pip install -r backend/requirements.txt && pip install pytest httpx
 
       - name: Ejecutar tests
-        # ✅ FIX: entramos al backend antes de correr pytest, así encuentra main.py
         working-directory: backend
         run: pytest tests/ -v
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: http://localhost:9000
+          # ✅ FIX 2: Le decimos a tus tests que busquen la base de datos en GitHub (localhost), NO en 'postgres_db'
+          POSTGRES_SERVER: localhost
+          POSTGRES_USER: sonar
+          POSTGRES_PASSWORD: sonar
+          POSTGRES_DB: sonar
+          DATABASE_URL: postgresql://sonar:sonar@localhost:5432/sonar
 
   # ─────────────────────────────────────────────
   # JOB 2: Lint del Frontend (Next.js)
@@ -54,7 +75,6 @@ jobs:
         run: cd frontend && npm install
 
       - name: Ejecutar lint
-        # ✅ FIX: next lint --no-eslint-rc evita el prompt interactivo
         run: cd frontend && npx next lint --dir app
 
   # ─────────────────────────────────────────────
@@ -69,7 +89,6 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Crear .env de prueba para CI
-        # ✅ FIX: el .env no está en el repo, lo creamos antes de validar
         run: |
           mkdir -p backend
           echo "SONAR_TOKEN=dummy_token_for_ci" > backend/.env
