@@ -429,10 +429,15 @@ async def upload_code(
 @app.post("/analyze-repo")
 async def analyze_repo(
     payload: dict,
-    authorization: str = Header(None),
     db: Session = Depends(get_db)
 ):
-    usuario_payload = verificar_token(authorization)
+    # 1. Ya no verificamos el token ni leemos el 'authorization'
+    # usuario_payload = verificar_token(authorization)
+    
+    # 2. Creamos un usuario de prueba rápido con la estructura que espera tu BD
+    # Nota: Usamos "sub" porque así lo definiste en tu función crear_token()
+    usuario_payload = {"sub": 1, "email": "equipo@prueba.com"}
+
     repo_url = payload.get("url", "").strip()
     if not repo_url:
         raise HTTPException(status_code=400, detail="No se recibió URL.")
@@ -454,6 +459,8 @@ async def analyze_repo(
                 yield sse_event({"finalizado": True, "status": "error", "mensaje": f"No se pudo clonar: {result.stderr}"})
                 return
             yield sse_event({"paso": 1, "mensaje": "✅ Repositorio clonado", "completado": True})
+            
+            # Aquí le pasamos el usuario_payload falso para que guarde en BD sin problemas
             yield from run_sonar_scan_stream(clone_path, project_key, usuario_payload, db)
         except subprocess.TimeoutExpired:
             yield sse_event({"finalizado": True, "status": "error", "mensaje": "El repositorio tardó demasiado."})
@@ -464,7 +471,6 @@ async def analyze_repo(
                 shutil.rmtree(clone_path, ignore_errors=True)
 
     return StreamingResponse(stream(), media_type="text/event-stream")
-
 
 @app.post("/analyze-text")
 async def analyze_text(
