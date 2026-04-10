@@ -1,4 +1,5 @@
 fastapi
+<<<<<<< HEAD
 uvicorn[standard]
 python-multipart
 httpx
@@ -10,3 +11,13 @@ psycopg2-binary
 sqlalchemy
 pydantic[email]
 email-validator
+=======
+uvicorn
+python-multipart
+httpx
+pytest
+bcrypt
+pyjwt
+psycopg2-binary
+sqlalchemy
+>>>>>>> origin/main

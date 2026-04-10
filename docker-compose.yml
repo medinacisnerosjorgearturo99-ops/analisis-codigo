@@ -1,8 +1,13 @@
 services:
+<<<<<<< HEAD
+=======
+  # 1. Base de Datos
+>>>>>>> origin/main
   db:
     image: postgres:15
     container_name: postgres_db
     environment:
+<<<<<<< HEAD
       POSTGRES_USER: ${POSTGRES_USER:-admin}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-adminpassword}
       POSTGRES_DB: ${POSTGRES_DB:-sonar}
@@ -10,21 +15,40 @@ services:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-admin} -d ${POSTGRES_DB:-sonar}"]
+=======
+      - POSTGRES_USER=admin
+      - POSTGRES_PASSWORD=adminpassword
+      - POSTGRES_DB=sonar
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d sonar"]
+>>>>>>> origin/main
       interval: 10s
       timeout: 5s
       retries: 5
     networks:
       - analisis-network
 
+<<<<<<< HEAD
+=======
+  # 2. SonarQube
+>>>>>>> origin/main
   sonarqube:
     image: sonarqube:lts-community
     container_name: sonarqube
     ports:
       - "9000:9000"
     environment:
+<<<<<<< HEAD
       SONAR_JDBC_URL: jdbc:postgresql://postgres_db:5432/${POSTGRES_DB:-sonar}
       SONAR_JDBC_USERNAME: ${POSTGRES_USER:-admin}
       SONAR_JDBC_PASSWORD: ${POSTGRES_PASSWORD:-adminpassword}
+=======
+      - SONAR_JDBC_URL=jdbc:postgresql://postgres_db:5432/sonar
+      - SONAR_JDBC_USERNAME=admin
+      - SONAR_JDBC_PASSWORD=adminpassword
+>>>>>>> origin/main
     volumes:
       - sonarqube_data:/opt/sonarqube/data
       - sonarqube_extensions:/opt/sonarqube/extensions
@@ -41,6 +65,10 @@ services:
     networks:
       - analisis-network
 
+<<<<<<< HEAD
+=======
+  # 3. Backend (FastAPI)
+>>>>>>> origin/main
   backend:
     build: ./backend
     container_name: fastapi_backend
@@ -56,6 +84,10 @@ services:
     networks:
       - analisis-network
 
+<<<<<<< HEAD
+=======
+  # 4. Frontend (Next.js)
+>>>>>>> origin/main
   frontend:
     build: ./frontend
     container_name: nextjs_frontend
@@ -74,4 +106,8 @@ volumes:
 
 networks:
   analisis-network:
+<<<<<<< HEAD
     driver: bridge
+=======
+    driver: bridge
+>>>>>>> origin/main

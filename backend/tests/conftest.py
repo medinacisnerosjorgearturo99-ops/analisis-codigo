@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 import os
 import sys
 
@@ -55,3 +56,11 @@ def registered_user(client):
     assert res.status_code == 200
     data = res.json()
     return {"token": data["token"], "email": data["email"], **payload}
+=======
+import sys
+import os
+
+# Agrega el directorio raíz del backend al path de Python
+# para que pytest pueda encontrar el módulo main.py
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+>>>>>>> origin/main
