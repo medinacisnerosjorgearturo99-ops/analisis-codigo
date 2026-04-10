@@ -176,7 +176,8 @@ def get_ai_recommendations(stats: dict, issues: list, project_key: str) -> str:
         for i in issues
     ]) if issues else "No se encontraron issues detallados."
 
-    prompt = f"""Eres un experto en calidad de software y DevOps. Analiza los siguientes resultados de SonarQube para el proyecto '{project_key}' y proporciona recomendaciones claras y prácticas en español.
+    # ✨ AQUÍ ESTÁ LA MAGIA: El nuevo prompt estructurado ✨
+    prompt = f"""Eres un experto en calidad de software y DevOps. Analiza los siguientes resultados de SonarQube para el proyecto '{project_key}'.
 
 MÉTRICAS:
 - Bugs: {bugs}
@@ -186,17 +187,21 @@ MÉTRICAS:
 ISSUES ENCONTRADOS:
 {issues_text}
 
-Por favor responde con:
-1. Un resumen breve del estado general del código (1-2 oraciones)
-2. Los 3 problemas más importantes a resolver y cómo solucionarlos
-3. Una recomendación final de prioridad (qué arreglar primero)
+Por favor responde estrictamente con la siguiente estructura:
+1. Un resumen breve del estado general del código desde la perspectiva DevOps (1-2 oraciones).
+2. Evaluación del 1 al 10 en las siguientes áreas (justificando brevemente tu puntuación basándote en las métricas):
+   - Seguridad: [Nota]/10
+   - Escalabilidad: [Nota]/10
+   - Facilidad de mantenimiento futuro: [Nota]/10
+3. Los 3 problemas más importantes a resolver y sugerencias arquitectónicas o de buenas prácticas para mejorarlos.
+4. Una recomendación final de prioridad (qué arreglar primero).
 
-Sé conciso, práctico y usa lenguaje claro. Máximo 250 palabras."""
+REGLA CRÍTICA: NO incluyas fragmentos de código en tu respuesta bajo ninguna circunstancia. Solo proporciona las sugerencias de mejora de forma descriptiva. Sé conciso y usa lenguaje claro. Máximo 350 palabras."""
 
     try:
         payload = json.dumps({
             "model": "claude-haiku-4-5",
-            "max_tokens": 500,
+            "max_tokens": 650, # Subimos los tokens un poco para que no se corte a la mitad
             "messages": [{"role": "user", "content": prompt}]
         }).encode("utf-8")
 
