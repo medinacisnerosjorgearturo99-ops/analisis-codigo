@@ -1,3 +1,80 @@
+<<<<<<< HEAD
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ── Backend: tests con SQLite (sin SonarQube real) ──────────────────────────
+  test-backend:
+    name: Tests backend
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ hashFiles('backend/requirements.txt') }}
+          restore-keys: pip-
+
+      - name: Instalar dependencias
+        run: pip install -r backend/requirements.txt
+
+      - name: Ejecutar tests
+        working-directory: backend
+        env:
+          JWT_SECRET: test-secret-for-ci-only
+          DATABASE_URL: sqlite:///./test.db
+        run: pytest tests/ -v
+
+  # ── Frontend: lint ──────────────────────────────────────────────────────────
+  lint-frontend:
+    name: Lint frontend
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Instalar dependencias
+        run: cd frontend && npm ci
+
+      - name: Lint
+        run: cd frontend && npx next lint --dir app
+
+  # ── Docker Compose: validación de sintaxis ──────────────────────────────────
+  validate-docker:
+    name: Validar docker-compose
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Crear .env de prueba
+        run: |
+          echo "JWT_SECRET=ci-dummy-secret" > backend/.env
+          echo "DATABASE_URL=postgresql://admin:adminpassword@postgres_db:5432/sonar" >> backend/.env
+          echo "SONAR_TOKEN=dummy" >> backend/.env
+          echo "SONAR_HOST_URL=http://sonarqube:9000" >> backend/.env
+
+      - name: Validar sintaxis
+        run: docker compose config
+=======
 name: CI Pipeline
 
 on:
@@ -96,3 +173,4 @@ jobs:
 
       - name: Validar sintaxis del docker-compose
         run: docker compose config
+>>>>>>> origin/main
