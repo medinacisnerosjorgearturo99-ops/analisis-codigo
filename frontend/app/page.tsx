@@ -486,7 +486,7 @@ export default function Home() {
                     <div className="w-10 h-10 bg-purple-950/50 border border-purple-900/50 rounded-lg flex items-center justify-center shadow-md"><span className="text-2xl drop-shadow-md">🤖</span></div>
                     <div>
                         <h3 className="text-purple-400 font-bold tracking-widest text-xs uppercase">Recomendaciones de IA</h3>
-                        <p className="text-gray-500 text-xs mt-0.5">Análisis con SonarQube - Proyecto '<span className="text-gray-400 font-semibold">{project_key}</span>'</p>
+                        <p className="text-gray-500 text-xs mt-0.5">Análisis con SonarQube - Proyecto &apos;<span className="text-gray-400 font-semibold">prueba_pagina</span>&apos;</p>
                     </div>
                   </div>
 
