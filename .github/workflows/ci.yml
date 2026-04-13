@@ -2,36 +2,20 @@ name: CI Pipeline
 
 on:
   pull_request:
-    branches: ' '
+    branches: [main]
   push:
-    branches: ' '
+    branches: [main]
 
 jobs:
   # ─────────────────────────────────────────────
   # JOB 1: Tests del Backend (Python)
   # ─────────────────────────────────────────────
   test-backend:
-    name: 🐍 Tests Backend
+    name: Tests Backend
     runs-on: ubuntu-latest
 
-    # ✅ FIX 1: Levantamos una base de datos real dentro del servidor de GitHub
-    services:
-      postgres:
-        image: postgres:15
-        env:
-          POSTGRES_USER: sonar
-          POSTGRES_PASSWORD: sonar
-          POSTGRES_DB: sonar
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
     steps:
-      - name: Checkout del código
+      - name: Checkout del codigo
         uses: actions/checkout@v4
 
       - name: Configurar Python 3.10
@@ -46,24 +30,20 @@ jobs:
         working-directory: backend
         run: pytest tests/ -v
         env:
+          JWT_SECRET: test-secret-key-for-ci-only
+          DATABASE_URL: sqlite:///./test.db
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: http://localhost:9000
-          # ✅ FIX 2: Le decimos a tus tests que busquen la base de datos en GitHub (localhost), NO en 'postgres_db'
-          POSTGRES_SERVER: localhost
-          POSTGRES_USER: sonar
-          POSTGRES_PASSWORD: sonar
-          POSTGRES_DB: sonar
-          DATABASE_URL: postgresql://sonar:sonar@localhost:5432/sonar
 
   # ─────────────────────────────────────────────
   # JOB 2: Lint del Frontend (Next.js)
   # ─────────────────────────────────────────────
   lint-frontend:
-    name: 🎨 Lint Frontend
+    name: Lint Frontend
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout del código
+      - name: Checkout del codigo
         uses: actions/checkout@v4
 
       - name: Configurar Node.js 18
@@ -78,20 +58,22 @@ jobs:
         run: cd frontend && npx next lint --dir app
 
   # ─────────────────────────────────────────────
-  # JOB 3: Verificar que Docker Compose es válido
+  # JOB 3: Verificar que Docker Compose es valido
   # ─────────────────────────────────────────────
   validate-docker:
-    name: 🐳 Validar Docker Compose
+    name: Validar Docker Compose
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout del código
+      - name: Checkout del codigo
         uses: actions/checkout@v4
 
       - name: Crear .env de prueba para CI
         run: |
           mkdir -p backend
-          echo "SONAR_TOKEN=dummy_token_for_ci" > backend/.env
+          echo "JWT_SECRET=dummy-secret-for-ci" > backend/.env
+          echo "DATABASE_URL=postgresql://admin:adminpassword@postgres_db:5432/sonar" >> backend/.env
+          echo "SONAR_TOKEN=dummy_token_for_ci" >> backend/.env
           echo "SONAR_HOST_URL=http://sonarqube:9000" >> backend/.env
 
       - name: Validar sintaxis del docker-compose
