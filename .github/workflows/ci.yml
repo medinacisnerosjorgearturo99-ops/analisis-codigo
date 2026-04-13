@@ -30,7 +30,8 @@ jobs:
         working-directory: backend
         run: pytest tests/ -v
         env:
-          JWT_SECRET: test-secret-key-for-ci-only
+          # ✅ JWT_SECRET debe tener minimo 32 caracteres para SHA256
+          JWT_SECRET: test-secret-key-for-ci-only-32chars!!
           DATABASE_URL: sqlite:///./test.db
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: http://localhost:9000
@@ -71,7 +72,7 @@ jobs:
       - name: Crear .env de prueba para CI
         run: |
           mkdir -p backend
-          echo "JWT_SECRET=dummy-secret-for-ci" > backend/.env
+          echo "JWT_SECRET=test-secret-key-for-ci-only-32chars!!" > backend/.env
           echo "DATABASE_URL=postgresql://admin:adminpassword@postgres_db:5432/sonar" >> backend/.env
           echo "SONAR_TOKEN=dummy_token_for_ci" >> backend/.env
           echo "SONAR_HOST_URL=http://sonarqube:9000" >> backend/.env
