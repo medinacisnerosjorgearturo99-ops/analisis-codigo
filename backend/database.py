@@ -1,13 +1,7 @@
 from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
-import os
+from sqlalchemy.orm import declarative_base, sessionmaker
 
-# Usa la misma BD de PostgreSQL que ya tiene el proyecto
-DATABASE_URL = os.environ.get(
-    "DATABASE_URL",
-    "postgresql://admin:adminpassword@postgres_db:5432/sonar"
-)
+from config import DATABASE_URL
 
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

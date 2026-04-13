@@ -1,9 +1,13 @@
 fastapi
-uvicorn
+uvicorn[standard]
 python-multipart
 httpx
 pytest
+pytest-asyncio
 bcrypt
 pyjwt
 psycopg2-binary
 sqlalchemy
+pydantic[email]
+email-validator
+slowapi
