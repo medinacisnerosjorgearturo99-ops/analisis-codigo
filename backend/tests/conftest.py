@@ -6,7 +6,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-os.environ.setdefault("JWT_SECRET", "test-secret-key-for-pytest-only-32chars!!")
+# ✅ Usa el mismo JWT_SECRET que el CI — debe tener 32+ chars
+os.environ.setdefault("JWT_SECRET", "test-secret-key-for-ci-only-32chars!!")
 os.environ.setdefault("DATABASE_URL", "sqlite:///./test.db")
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -32,7 +33,7 @@ def setup_db():
     Base.metadata.create_all(bind=engine)
     app.dependency_overrides[get_db] = override_get_db
 
-    # ✅ Desactivar rate limiter en tests para evitar 429 Too Many Requests
+    # ✅ Desactivar rate limiter en tests
     from main import limiter
     limiter.enabled = False
 
