@@ -1,5 +1,5 @@
 """
-Tests del backend — cubre health, auth, historial y validaciones de análisis.
+Tests del backend.
 Ejecutar con: pytest tests/ -v
 """
 import io
@@ -89,7 +89,11 @@ def test_historial_con_token_invalido_retorna_401(client):
 
 
 def test_historial_vacio_para_usuario_nuevo(client, registered_user):
-    res = client.get("/historial", headers={"Authorization": f"Bearer {registered_user['token']}"})
+    # ✅ FIX: usa el token del fixture que ya registró al usuario
+    res = client.get(
+        "/historial",
+        headers={"Authorization": f"Bearer {registered_user['token']}"}
+    )
     assert res.status_code == 200
     assert isinstance(res.json(), list)
 
